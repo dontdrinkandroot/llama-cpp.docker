@@ -9,7 +9,7 @@ if [ -z "$MODEL_URL" ] && [ -z "$MMPROJ_URL" ] && [ -z "$MTP_URL" ]; then
     echo "ERROR: No model URLs configured."
     echo "Set at least one of MODEL_URL, MMPROJ_URL, or MTP_URL."
     echo "Example:"
-    echo "  MODEL_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf"
+    echo "  MODEL_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf"
     echo "  MMPROJ_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-BF16.gguf"
     echo "  MTP_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mtp-gemma-4-26B-A4B-it.gguf"
     exit 1

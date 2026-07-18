@@ -157,26 +157,27 @@ actually used.
 
 ## Example: Gemma-4-26B-A4B (Unsloth, with MTP)
 
-Sized for an RTX 5090 (32 GB) where this is the only GPU application. Doubles context to 65K
-and runs two concurrent slots. Example values reproduced from `.env` (which is NOT committed —
-see `README.md`):
+Sized for an RTX 5090 (32 GB) where this is the only GPU application. Uses Q6_K_XL
+(higher-quality quant) at 65K context with a single slot — keeps ~5 GB VRAM headroom
+even after the larger weights. Example values reproduced from `.env` (which is NOT
+committed — see `README.md`):
 
 ```
 HF_TOKEN=
 
-MODEL_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
+MODEL_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf
 MMPROJ_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-BF16.gguf
 MTP_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mtp-gemma-4-26B-A4B-it.gguf
 SPEC_TYPE=mtp
 
-CTX_SIZE=65536          # Doubled from 32K; fits comfortably in 32 GB VRAM
+CTX_SIZE=65536          # Doubled from 32K; fits in 32 GB VRAM with Q6_K_XL + 1 slot
 GPU_LAYERS=99           # Offload all layers to GPU
 TEMPERATURE=0.6         # Deliberately conservative. Google's Gemma 4 recipe is 1.0;
                         # bump if you want more varied chat. Keep low for tool/OCR.
 TOP_P=0.95
 TOP_K=64
-PARALLEL=2              # 2 concurrent slots; fits at 65K ctx on 32 GB.
-                        # Bump to 4 only if you drop CTX_SIZE back to 32768.
+PARALLEL=1              # Single slot; required on 32 GB with Q6_K_XL at 65K ctx.
+                        # Bump to 2 only if you drop CTX_SIZE back to 32768.
 FLASH_ATTN=1
 BATCH_SIZE=2048         # Upstream default; ~3-4x faster prefill than 512
 # UBATCH_SIZE omitted   # Default 512 fits all reasonable cases
@@ -195,8 +196,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
     CMD curl --fail http://localhost:${PORT:-8080}/health || exit 1
 ```
 
-- **`start-period=1800s` (30 min):** gives the container a grace period that covers the one-time ~21 GB model
-  download (Q5_K_XL) on first start plus the model load and KV-cache init for a 65k context. During this window,
+- **`start-period=1800s` (30 min):** gives the container a grace period that covers the one-time ~23 GB model
+  download (Q6_K_XL) on first start plus the model load and KV-cache init for a 65k context. During this window,
   healthcheck failures do not count against the container. On subsequent starts (models already in the volume), the
   server is ready much faster.
 - **`curl`** is installed alongside `aria2` in the Dockerfile.
