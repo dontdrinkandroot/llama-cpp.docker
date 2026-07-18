@@ -25,6 +25,9 @@ Models are downloaded via `aria2c` with an input file listing all configured URL
   continues where it left off on next start.
 - **`-x16 -s16`**: 16 parallel connections per file (chunked download).
 - **`-j3`**: downloads all 3 model files concurrently.
+- **`--file-allocation=none`**: file grows as bytes arrive so `os.path.getsize()` tracks real progress. Default
+  `prealloc` on Linux calls `posix_fallocate()` and reports full size from the start, which would make the progress
+  page show 100% instantly.
 - **`--header "Authorization: Bearer $HF_TOKEN"`**: auth header sent on all requests (required for gated repos).
   Passed as a bash array element so the header value stays a single argument regardless of spaces.
 - **`-i` (input file)**: each URL is paired with an explicit `out=` filename so the output name is controlled regardless
@@ -227,12 +230,15 @@ see a consistent "not ready yet" contract across both phases (download → model
 
 Implementation:
 
-- `progress-server.py` (stdlib only — `http.server`, `socketserver`, `subprocess`, `html`, `urllib`) listens on
-  `0.0.0.0:$PORT`. One HEAD request per configured URL is performed on startup to cache expected sizes; requests
-  then just `stat()` the model files and render the page.
-- `entrypoint.sh` starts `python3 /progress-server.py &` before the download loop, traps `EXIT` (and `INT`/`TERM`)
-  to kill it on failure paths and signals, and explicitly kills it before `exec`-ing `llama-server` (since `exec`
-  does not fire traps).
+- `progress-server.py` (stdlib only — `http.server`, `socketserver`, `subprocess`, `threading`, `html`, `urllib`) listens on
+  `0.0.0.0:$PORT`. The HTTP socket is bound **before** the HEAD requests run, so the server always answers with HTTP 503
+  from the very first millisecond onward; HEAD requests happen in a daemon thread in the background and the page just
+  shows indeterminate bars until the expected sizes are known. The config file is updated atomically (`write` to
+  `.tmp` then `os.replace`) so a request that arrives mid-update never sees a partial JSON.
+- `entrypoint.sh` starts `python3 /progress-server.py &` and then busy-waits via `/dev/tcp/127.0.0.1/$PORT` for the port
+  to be bound (up to ~5 s) before kicking off aria2c. This closes the last sub-second race during Python interpreter
+  startup. It traps `EXIT`/`INT`/`TERM` to kill the server on failure paths and signals, and explicitly kills it
+  before `exec`-ing `llama-server` (since `exec` does not fire traps).
 - `python3` is added to the `apt-get install` line in the `Dockerfile`.
 
 ## SSH StrictModes Fix (for vast.ai)

@@ -23,6 +23,16 @@ if [ -f /progress-server.py ]; then
     trap stop_progress_server EXIT
     trap 'stop_progress_server; exit 130' INT
     trap 'stop_progress_server; exit 143' TERM
+    # Wait until the progress server has bound the port (a few hundred ms for
+    # Python startup) so requests that arrive immediately after this point
+    # never see a closed port (which would RST inside the container's netns).
+    for _ in $(seq 1 50); do
+        if (exec 3<>/dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then
+            exec 3<&- 3>&-
+            break
+        fi
+        sleep 0.1
+    done
 fi
 
 if [ -z "$MODEL_URL" ] && [ -z "$MMPROJ_URL" ] && [ -z "$MTP_URL" ]; then
@@ -69,6 +79,7 @@ until [ $attempt -gt "$MAX_ATTEMPTS" ]; do
         -s16 \
         -j3 \
         -k 1M \
+        --file-allocation=none \
         "${AUTH_HEADERS[@]}" \
         -d "$MODEL_DIR" \
         -i "$INPUT_FILE"; then

@@ -5,6 +5,7 @@ import json
 import os
 import socketserver
 import subprocess
+import threading
 from html import escape
 from urllib.parse import urlparse
 
@@ -42,12 +43,28 @@ def head_content_length(url):
     return size
 
 
-def build_config():
+def build_initial_config():
     return [{
         "label": label,
         "filename": os.path.basename(urlparse(url).path),
-        "expected_bytes": head_content_length(url),
+        "expected_bytes": 0,
     } for label, url in URLS if url]
+
+
+URL_BY_LABEL = {label: url for label, url in URLS}
+
+
+def fetch_sizes(cfg):
+    print("=== Determining model sizes (HEAD requests) ===", flush=True)
+    for item in cfg:
+        item["expected_bytes"] = head_content_length(URL_BY_LABEL[item["label"]])
+        print(f"  {item['label']}: {item['filename']} -> {item['expected_bytes']} bytes",
+              flush=True)
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f)
+    os.replace(tmp, CONFIG_PATH)
+    print("=== Sizes cached; progress page now shows totals ===", flush=True)
 
 
 def fmt_bytes(n):
@@ -90,6 +107,12 @@ def render(cfg):
         for item, dl, exp, pct in rows
     )
 
+    sizes_known = any(item["expected_bytes"] for item in cfg)
+    status_msg = ("Downloading model files. This page refreshes every "
+                  f"{REFRESH}s.") if sizes_known else (
+                  f"Determining model sizes&hellip; download will start "
+                  f"shortly. This page refreshes every {REFRESH}s.")
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -113,7 +136,7 @@ def render(cfg):
 </head>
 <body>
   <h1>Setting up llama-server&hellip;</h1>
-  <div class="status">Downloading model files. This page refreshes every {REFRESH}s.</div>
+  <div class="status">{status_msg}</div>
 {body_rows}
   <div class="overall">
     <strong>Overall:</strong>
@@ -152,16 +175,14 @@ class ReuseTCPServer(socketserver.ThreadingTCPServer):
 
 
 def main():
-    print("=== Building progress config (HEAD requests) ===", flush=True)
-    cfg = build_config()
+    cfg = build_initial_config()
     with open(CONFIG_PATH, "w") as f:
         json.dump(cfg, f)
-    for item in cfg:
-        print(f"  {item['label']}: {item['filename']} -> {item['expected_bytes']} bytes",
-              flush=True)
     print(f"=== Serving progress page on 0.0.0.0:{PORT} (HTTP 503) ===",
           flush=True)
-    ReuseTCPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    server = ReuseTCPServer(("0.0.0.0", PORT), Handler)
+    threading.Thread(target=fetch_sizes, args=(cfg,), daemon=True).start()
+    server.serve_forever()
 
 
 if __name__ == "__main__":
