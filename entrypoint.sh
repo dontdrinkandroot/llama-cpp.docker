@@ -69,8 +69,6 @@ rm -f "$INPUT_FILE"
 
 echo "=== Starting llama-server ==="
 
-cd "$MODEL_DIR"
-
 MODEL_FLAG=""
 if [ -n "$MODEL_URL" ]; then
     MODEL_FLAG="--model $MODEL_DIR/$(basename "$MODEL_URL")"
