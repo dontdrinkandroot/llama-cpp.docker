@@ -25,9 +25,10 @@ Models are downloaded via `aria2c` with an input file listing all configured URL
   continues where it left off on next start.
 - **`-x16 -s16`**: 16 parallel connections per file (chunked download).
 - **`-j3`**: downloads all 3 model files concurrently.
-- **`--file-allocation=none`**: file grows as bytes arrive so `os.path.getsize()` tracks real progress. Default
-  `prealloc` on Linux calls `posix_fallocate()` and reports full size from the start, which would make the progress
-  page show 100% instantly.
+- **`--enable-rpc --rpc-listen-port=6800 --rpc-listen-all=false`**: exposes aria2c's built-in JSON-RPC interface on
+  `http://127.0.0.1:6800/jsonrpc` (localhost only). The progress server polls this every 2 s for real
+  `completedLength` / `totalLength` / `downloadSpeed` — no HEAD requests, no `stat()` on the filesystem, immune to
+  `prealloc`/`falloc` artifacts. See [Progress Page](#progress-page-during-download).
 - **`--header "Authorization: Bearer $HF_TOKEN"`**: auth header sent on all requests (required for gated repos).
   Passed as a bash array element so the header value stays a single argument regardless of spaces.
 - **`-i` (input file)**: each URL is paired with an explicit `out=` filename so the output name is controlled regardless
@@ -54,7 +55,7 @@ needs to run the container have `${VAR:-default}` fallbacks: `MODEL_DIR` (`/mode
 │       └── docker-publish.yml  # CI: build & push image to GHCR
 ├── Dockerfile          # FROM upstream CUDA server image; installs aria2, curl, python3, sshd StrictModes fix + entrypoint; HEALTHCHECK
 ├── entrypoint.sh       # Downloads models via aria2c, then execs llama-server; starts/stops progress-server.py
-├── progress-server.py  # Stdlib HTTP server: 503 + Retry-After progress page during download phase
+├── progress-server.py  # Stdlib HTTP server + JSON-RPC client: 503 progress page during download, polls aria2c at 127.0.0.1:6800
 ├── docker-compose.yml  # Port 8080, GPU, models volume, env_file: .env, all config via env vars
 ├── .dockerignore
 ├── .env                # Committed example (E2B testing config); edit locally, never commit secrets
@@ -147,9 +148,10 @@ This step can only be done after the first build creates the package.
 
 ### Other
 
-| Variable    | Description                                                                  |
-|-------------|------------------------------------------------------------------------------|
-| `HF_TOKEN`  | HuggingFace token. Required only for gated repos. Optional for public repos. |
+| Variable         | Default                                     | Description                                                                       |
+|------------------|---------------------------------------------|-----------------------------------------------------------------------------------|
+| `HF_TOKEN`       | (empty)                                     | HuggingFace token. Required only for gated repos. Optional for public repos.     |
+| `ARIA2_RPC_URL`  | `http://127.0.0.1:6800/jsonrpc`             | URL of aria2c's JSON-RPC endpoint. Must match the `--rpc-listen-port` used in `entrypoint.sh`. |
 
 Local filenames are derived from each URL via `basename` (e.g. `.../foo.gguf` → `$MODEL_DIR/foo.gguf`).
 
@@ -215,7 +217,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
 
 While the model files are being downloaded, the container serves a small self-refreshing HTML page on
 `${PORT:-8080}` — the same port llama-server will use later. The page auto-refreshes every 2 s and shows per-file
-and overall progress based on filesystem size vs. `Content-Length` (cached at startup via HEAD requests).
+and overall progress, download speed, and ETA.
 
 The response is always:
 
@@ -230,15 +232,19 @@ see a consistent "not ready yet" contract across both phases (download → model
 
 Implementation:
 
-- `progress-server.py` (stdlib only — `http.server`, `socketserver`, `subprocess`, `threading`, `html`, `urllib`) listens on
-  `0.0.0.0:$PORT`. The HTTP socket is bound **before** the HEAD requests run, so the server always answers with HTTP 503
-  from the very first millisecond onward; HEAD requests happen in a daemon thread in the background and the page just
-  shows indeterminate bars until the expected sizes are known. The config file is updated atomically (`write` to
-  `.tmp` then `os.replace`) so a request that arrives mid-update never sees a partial JSON.
-- `entrypoint.sh` starts `python3 /progress-server.py &` and then busy-waits via `/dev/tcp/127.0.0.1/$PORT` for the port
-  to be bound (up to ~5 s) before kicking off aria2c. This closes the last sub-second race during Python interpreter
-  startup. It traps `EXIT`/`INT`/`TERM` to kill the server on failure paths and signals, and explicitly kills it
-  before `exec`-ing `llama-server` (since `exec` does not fire traps).
+- `progress-server.py` (stdlib only — `http.server`, `socketserver`, `urllib.request`, `threading`, `html`) binds
+  `0.0.0.0:$PORT` immediately and serves the progress page from the first millisecond. A daemon thread polls
+  aria2c's JSON-RPC interface every 2 s (`aria2.tellActive` + `aria2.tellWaiting` + `aria2.tellStopped`) for
+  authoritative `length` / `completedLength` / `downloadSpeed` per file — no filesystem `stat`, no HEAD requests,
+  no race with aria2c's `prealloc`/`falloc` (the file's apparent size is irrelevant; we read from aria2c's internal
+  state instead).
+- The page's per-file and overall rows show downloaded/total bytes, percent, instantaneous speed (sum of all active
+  downloads), and ETA. Before aria2c is reachable, the bars are indeterminate and the status reads "Waiting for
+  downloader…".
+- `entrypoint.sh` starts `python3 /progress-server.py &` and then busy-waits via `/dev/tcp/127.0.0.1/$PORT` for the
+  port to be bound (up to ~5 s) before kicking off aria2c. This closes the last sub-second race during Python
+  interpreter startup. It traps `EXIT`/`INT`/`TERM` to kill the server on failure paths and signals, and explicitly
+  kills it before `exec`-ing `llama-server` (since `exec` does not fire traps).
 - `python3` is added to the `apt-get install` line in the `Dockerfile`.
 
 ## SSH StrictModes Fix (for vast.ai)

@@ -6,6 +6,10 @@ PORT="${PORT:-8080}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 
 PROGRESS_PID_FILE=/tmp/progress-server.pid
+ARIA2_PID_FILE=/tmp/aria2c.pid
+ARIA2_RPC_URL="${ARIA2_RPC_URL:-http://127.0.0.1:6800/jsonrpc}"
+ARIA2_RPC_PORT="${ARIA2_RPC_PORT:-6800}"
+
 stop_progress_server() {
     if [ -f "$PROGRESS_PID_FILE" ]; then
         local pid
@@ -17,12 +21,37 @@ stop_progress_server() {
         rm -f "$PROGRESS_PID_FILE"
     fi
 }
+
+# Tear down aria2c. Safe to call multiple times; safe to call when not started.
+stop_aria2c() {
+    if [ -f "$ARIA2_PID_FILE" ]; then
+        local pid
+        pid="$(cat "$ARIA2_PID_FILE")"
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            # Give aria2c up to 5s to flush and exit; then SIGKILL.
+            for _ in $(seq 1 50); do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 0.1
+            done
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+        rm -f "$ARIA2_PID_FILE"
+    fi
+}
+
+# Tear down both background processes on any exit path.
+cleanup() {
+    stop_aria2c
+    stop_progress_server
+}
 if [ -f /progress-server.py ]; then
     python3 /progress-server.py &
     echo $! > "$PROGRESS_PID_FILE"
-    trap stop_progress_server EXIT
-    trap 'stop_progress_server; exit 130' INT
-    trap 'stop_progress_server; exit 143' TERM
+    trap cleanup EXIT
+    trap 'cleanup; exit 130' INT
+    trap 'cleanup; exit 143' TERM
     # Wait until the progress server has bound the port (a few hundred ms for
     # Python startup) so requests that arrive immediately after this point
     # never see a closed port (which would RST inside the container's netns).
@@ -71,29 +100,102 @@ if [ -n "$MTP_URL" ]; then
 fi
 
 attempt=1
+download_ok=1
 until [ $attempt -gt "$MAX_ATTEMPTS" ]; do
     echo "=== Downloading models (attempt $attempt/$MAX_ATTEMPTS) ==="
-    if aria2c \
+    # aria2c with --enable-rpc stays running after downloads complete (to
+    # serve the JSON-RPC interface for the progress page), so we cannot just
+    # `if aria2c ...; then`. Instead: start aria2c in the background, poll
+    # its RPC until every file is complete (or it crashes), then shut it
+    # down. -c resumes from any previous attempt's .aria2 control file.
+    aria2c \
         -c \
         -x16 \
         -s16 \
         -j3 \
         -k 1M \
-        --file-allocation=none \
+        --enable-rpc \
+        --rpc-listen-port="$ARIA2_RPC_PORT" \
+        --rpc-listen-all=false \
         "${AUTH_HEADERS[@]}" \
         -d "$MODEL_DIR" \
-        -i "$INPUT_FILE"; then
+        -i "$INPUT_FILE" \
+        >/tmp/aria2c.log 2>&1 &
+    ARIA2_PID=$!
+    echo "$ARIA2_PID" > "$ARIA2_PID_FILE"
+
+    # Wait for the RPC socket to come up before polling (a few hundred ms).
+    rpc_ready=0
+    for _ in $(seq 1 50); do
+        if (exec 3<>/dev/tcp/127.0.0.1/"$ARIA2_RPC_PORT") 2>/dev/null; then
+            exec 3<&- 3>&-
+            rpc_ready=1
+            break
+        fi
+        # aria2c exited before RPC came up -> fatal error.
+        if ! kill -0 "$ARIA2_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+
+    download_ok=1
+    if [ "$rpc_ready" = "1" ]; then
+        # Poll until no active and no waiting downloads remain. We never
+        # auto-retry on a single transient error: if aria2c crashes, the
+        # process check below catches it and we restart with -c.
+        # A curl failure here means RPC is unreachable (aria2c is still
+        # alive per the kill -0 check); keep polling.
+        while true; do
+            if ! kill -0 "$ARIA2_PID" 2>/dev/null; then
+                echo "ERROR: aria2c exited unexpectedly."
+                cat /tmp/aria2c.log
+                download_ok=0
+                break
+            fi
+            active_resp="$(curl -fsS --max-time 2 \
+                -H 'Content-Type: application/json' \
+                --data '{"jsonrpc":"2.0","id":"x","method":"aria2.tellActive"}' \
+                "$ARIA2_RPC_URL" 2>/dev/null || true)"
+            waiting_resp="$(curl -fsS --max-time 2 \
+                -H 'Content-Type: application/json' \
+                --data '{"jsonrpc":"2.0","id":"x","method":"aria2.tellWaiting","params":[0,100]}' \
+                "$ARIA2_RPC_URL" 2>/dev/null || true)"
+            # If aria2c is alive but RPC is unreachable, keep waiting.
+            if [ -z "$active_resp" ] || [ -z "$waiting_resp" ]; then
+                sleep 1
+                continue
+            fi
+            # Extract just the contents of "result":[...] for a length check.
+            active="${active_resp#*\"result\":\[}"
+            active="${active%%]*}"
+            waiting="${waiting_resp#*\"result\":\[}"
+            waiting="${waiting%%]*}"
+            if [ -z "$active" ] && [ -z "$waiting" ]; then
+                break
+            fi
+            sleep 2
+        done
+    else
+        echo "ERROR: aria2c RPC did not become ready."
+        cat /tmp/aria2c.log
+        download_ok=0
+    fi
+
+    # Shut aria2c down cleanly (idempotent). tail the log for the operator.
+    stop_aria2c
+    if [ "$download_ok" = "1" ]; then
         echo "=== Download complete ==="
         break
-    else
-        echo "=== Download attempt $attempt failed ==="
-        attempt=$((attempt + 1))
-        if [ $attempt -gt "$MAX_ATTEMPTS" ]; then
-            echo "ERROR: Download failed after $MAX_ATTEMPTS attempts."
-            rm -f "$INPUT_FILE"
-            exit 1
-        fi
     fi
+
+    attempt=$((attempt + 1))
+    if [ $attempt -gt "$MAX_ATTEMPTS" ]; then
+        echo "ERROR: Download failed after $MAX_ATTEMPTS attempts."
+        rm -f "$INPUT_FILE"
+        exit 1
+    fi
+    echo "=== Download attempt $((attempt - 1)) failed; retrying with -c ==="
 done
 
 rm -f "$INPUT_FILE"
@@ -199,6 +301,8 @@ printf '%q ' "${CMD[@]}"
 echo
 echo "============================"
 
-stop_progress_server
+# aria2c is already stopped (stop_aria2c ran above). Now stop the progress
+# server so llama-server can bind --port. exec below does not fire traps.
+cleanup
 
 exec "${CMD[@]}"

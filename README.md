@@ -67,8 +67,9 @@ forces a fresh download.
 |----------|---------|-------------|
 | `HF_TOKEN` | (empty) | HuggingFace token; **required** for gated repos. Optional if all URLs point to public repos. |
 | `MODEL_DIR` | `/models` | Directory for model files (mapped to the `models` volume) |
-| `PORT` | `8080` | llama-server HTTP port |
+| `PORT` | `8080` | llama-server HTTP port (also used for the progress page during the download phase) |
 | `MAX_ATTEMPTS` | `3` | Max download retry attempts before failing |
+| `ARIA2_RPC_URL` | `http://127.0.0.1:6800/jsonrpc` | aria2c JSON-RPC endpoint that the progress server polls. Must match `--rpc-listen-port` used in `entrypoint.sh`. |
 | `MODEL_URL` | *(none — at least one URL must be set)* | URL for the main model GGUF file |
 | `MMPROJ_URL` | *(none)* | URL for the multimodal projector GGUF file (vision/audio models) |
 | `MTP_URL` | *(none)* | URL for the speculative-decoding draft model GGUF (e.g. MTP). Pairs with `SPEC_TYPE`. |
