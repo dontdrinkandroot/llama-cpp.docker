@@ -5,6 +5,26 @@ MODEL_DIR="${MODEL_DIR:-/models}"
 PORT="${PORT:-8080}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 
+PROGRESS_PID_FILE=/tmp/progress-server.pid
+stop_progress_server() {
+    if [ -f "$PROGRESS_PID_FILE" ]; then
+        local pid
+        pid="$(cat "$PROGRESS_PID_FILE")"
+        kill "$pid" 2>/dev/null || true
+        # wait for the socket to be released; SIGTERM'd child exits 143,
+        # which we suppress so `set -e` does not abort before `exec`.
+        wait "$pid" 2>/dev/null || true
+        rm -f "$PROGRESS_PID_FILE"
+    fi
+}
+if [ -f /progress-server.py ]; then
+    python3 /progress-server.py &
+    echo $! > "$PROGRESS_PID_FILE"
+    trap stop_progress_server EXIT
+    trap 'stop_progress_server; exit 130' INT
+    trap 'stop_progress_server; exit 143' TERM
+fi
+
 if [ -z "$MODEL_URL" ] && [ -z "$MMPROJ_URL" ] && [ -z "$MTP_URL" ]; then
     echo "ERROR: No model URLs configured."
     echo "Set at least one of MODEL_URL, MMPROJ_URL, or MTP_URL."
@@ -83,7 +103,13 @@ MTP_FLAGS=""
 if [ -n "$MTP_URL" ]; then
     MTP_FLAGS="--spec-draft-model $MODEL_DIR/$(basename "$MTP_URL")"
     if [ -n "$SPEC_TYPE" ]; then
-        MTP_FLAGS="$MTP_FLAGS --spec-type $SPEC_TYPE"
+        # Translate legacy/bare "mtp" to the current upstream value "draft-mtp"
+        # (valid in recent llama.cpp builds; bare "mtp" is now rejected).
+        spec_type="$SPEC_TYPE"
+        if [ "$spec_type" = "mtp" ]; then
+            spec_type="draft-mtp"
+        fi
+        MTP_FLAGS="$MTP_FLAGS --spec-type $spec_type"
     fi
 fi
 
@@ -161,5 +187,7 @@ echo "=== llama-server command ==="
 printf '%q ' "${CMD[@]}"
 echo
 echo "============================"
+
+stop_progress_server
 
 exec "${CMD[@]}"
