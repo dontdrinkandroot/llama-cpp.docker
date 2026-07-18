@@ -11,17 +11,19 @@ Models are downloaded automatically on first startup via aria2c and cached in a 
 
 ## Configuration
 
-### 1. Create a local `.env` file
+### 1. Edit `.env`
 
-The repo does **not** ship a `.env` file (it would leak secrets). Create one next to `docker-compose.yml` with at
-least one model URL. The other env vars are optional — see [Environment variables](#environment-variables) below.
+The repo ships an example `.env` next to `docker-compose.yml` (currently configured for the
+[Gemma 4 E2B-it testing setup](#example-gemma-4-e2b-it-unsloth-testing-with-mtp)). Edit it in place
+to switch model, set `HF_TOKEN` for gated repos, or tweak runtime values. See
+[Environment variables](#environment-variables) below for the full list.
 
-```bash
-cp -n .env .env.disabled 2>/dev/null  # optional: keep a placeholder
-nano .env
-```
+> **Heads-up:** `.env` is tracked in git, so any change you push is public. Public HuggingFace URLs
+> and tuning values are fine; **never** commit a real `HF_TOKEN` — for a gated repo, set the token
+> locally and leave the field empty in the committed copy.
 
-You must set at least one of `MODEL_URL`, `MMPROJ_URL`, or `MTP_URL` to point at a GGUF file on HuggingFace.
+You must set at least one of `MODEL_URL`, `MMPROJ_URL`, or `MTP_URL` to point at a GGUF file on
+HuggingFace.
 
 ### 2. Set your HuggingFace token
 
@@ -36,7 +38,7 @@ Put it in your `.env`:
 HF_TOKEN=hf_your_token_here
 ```
 
-Docker Compose reads `.env` automatically; the compose file references it via `${HF_TOKEN:-}` (docker-compose.yml).
+Docker Compose reads `.env` automatically; `docker-compose.yml` wires it in via `env_file: - .env`.
 
 ### 3. Build and start
 
@@ -99,7 +101,7 @@ HF_TOKEN=
 MODEL_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf
 MMPROJ_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-BF16.gguf
 MTP_URL=https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mtp-gemma-4-26B-A4B-it.gguf
-SPEC_TYPE=mtp
+SPEC_TYPE=draft-mtp
 
 CTX_SIZE=65536          # Doubled from 32K; fits in 32 GB VRAM with Q6_K_XL + 1 slot
 GPU_LAYERS=99           # Offload all layers to GPU
@@ -117,6 +119,47 @@ PORT=8080
 ```
 
 `NO_CONT_BATCHING` is deliberately omitted: continuous batching is enabled by default upstream.
+
+### Example: Gemma 4 E2B-it (Unsloth, testing, with MTP)
+
+A **small** setup for local smoke tests — exercises all three download paths (`MODEL_URL` +
+`MMPROJ_URL` + `MTP_URL`) and the speculative-decoding branch of the entrypoint in a single run.
+Sized to fit on a 6 GB consumer GPU with audio + image + text inputs.
+
+This is the configuration shipped in the repo's `.env`.
+
+```env
+HF_TOKEN=
+
+MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf
+MMPROJ_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mmproj-F16.gguf
+MTP_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mtp-gemma-4-E2B-it.gguf
+SPEC_TYPE=draft-mtp
+
+CTX_SIZE=32768          # E2B advertises 128K; stay conservative on tight memory
+GPU_LAYERS=99           # Offload all layers to GPU
+TEMPERATURE=0.7
+TOP_P=0.95
+TOP_K=64
+PARALLEL=1
+FLASH_ATTN=1
+BATCH_SIZE=2048         # Upstream default; faster prefill than 512
+
+PORT=8080
+```
+
+| File | Size | Purpose |
+|------|------|---------|
+| `gemma-4-E2B-it-Q4_K_M.gguf` | 3.11 GB | main model |
+| `mmproj-F16.gguf` | 986 MB | vision/audio projector |
+| `mtp-gemma-4-E2B-it.gguf` | 97.8 MB | speculative drafter (~0.4 B params) |
+
+**Total download:** ~4.2 GB. **VRAM:** ~6 GB. **Context:** 128K (we use 32K to stay safe).
+
+> **Known caveat:** Speculative decoding + `mmproj` together was historically broken in
+> `llama-server` (see [ggml-org/llama.cpp#19712](https://github.com/ggml-org/llama.cpp/issues/19712)).
+> Recent upstream builds reportedly fixed it; if startup fails with this combo, drop `MTP_URL`
+> first to confirm the model itself runs, then re-add it.
 
 ## Web UI
 

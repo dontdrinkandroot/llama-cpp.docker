@@ -52,8 +52,9 @@ needs to run the container have `${VAR:-default}` fallbacks: `MODEL_DIR` (`/mode
 ├── Dockerfile          # FROM upstream CUDA server image; installs aria2, curl, python3, sshd StrictModes fix + entrypoint; HEALTHCHECK
 ├── entrypoint.sh       # Downloads models via aria2c, then execs llama-server; starts/stops progress-server.py
 ├── progress-server.py  # Stdlib HTTP server: 503 + Retry-After progress page during download phase
-├── docker-compose.yml  # Port 8080, GPU, models volume, all config via env vars
+├── docker-compose.yml  # Port 8080, GPU, models volume, env_file: .env, all config via env vars
 ├── .dockerignore
+├── .env                # Committed example (E2B testing config); edit locally, never commit secrets
 └── AGENTS.md
 ```
 
@@ -162,8 +163,9 @@ loaded but not actually used.
 
 Sized for an RTX 5090 (32 GB) where this is the only GPU application. Uses Q6_K_XL
 (higher-quality quant) at 65K context with a single slot — keeps ~5 GB VRAM headroom
-even after the larger weights. Example values reproduced from `.env` (which is NOT
-committed — see `README.md`):
+even after the larger weights. Example values reproduced from the `26B-A4B` block in
+`README.md`; the repo's shipped `.env` is a smaller E2B testing setup — see
+[README.md "Example: Gemma 4 E2B-it"](./README.md#example-gemma-4-e2b-it-unsloth-testing-with-mtp).
 
 ```
 HF_TOKEN=

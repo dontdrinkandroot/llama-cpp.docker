@@ -2,26 +2,12 @@ services:
   llama-server:
     build: .
     image: ghcr.io/dontdrinkandroot/llama-cpp.docker:latest
+    env_file:
+      - .env
     ports:
       - "${PORT:-8080}:8080"
     volumes:
       - models:/models
-    environment:
-      - HF_TOKEN=${HF_TOKEN:-}
-      - MODEL_URL=${MODEL_URL:-}
-      - MMPROJ_URL=${MMPROJ_URL:-}
-      - MTP_URL=${MTP_URL:-}
-      - SPEC_TYPE=${SPEC_TYPE:-}
-      - CTX_SIZE=${CTX_SIZE:-}
-      - GPU_LAYERS=${GPU_LAYERS:-}
-      - TEMPERATURE=${TEMPERATURE:-}
-      - TOP_P=${TOP_P:-}
-      - TOP_K=${TOP_K:-}
-      - PARALLEL=${PARALLEL:-}
-      - FLASH_ATTN=${FLASH_ATTN:-}
-      - NO_CONT_BATCHING=${NO_CONT_BATCHING:-}
-      - BATCH_SIZE=${BATCH_SIZE:-}
-      - UBATCH_SIZE=${UBATCH_SIZE:-}
     deploy:
       resources:
         reservations:

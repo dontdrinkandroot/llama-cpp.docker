@@ -4,3 +4,4 @@ AGENTS.md
 docker-compose.yml
 .dockerignore
 README.md
+.env
