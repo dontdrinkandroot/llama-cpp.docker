@@ -13,8 +13,8 @@ from urllib.parse import urlparse
 MODEL_DIR = os.environ.get("MODEL_DIR", "/models")
 PORT = int(os.environ.get("PORT", "8080"))
 ARIA2_RPC_URL = os.environ.get("ARIA2_RPC_URL", "http://127.0.0.1:6800/jsonrpc")
-REFRESH = 2
-POLL_INTERVAL = 2.0
+REFRESH = 10
+POLL_INTERVAL = 10.0
 
 URLS = [
     ("model",            os.environ.get("MODEL_URL",  "")),

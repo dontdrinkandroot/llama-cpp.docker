@@ -30,7 +30,7 @@ Models are downloaded via `aria2c` with an input file listing all configured URL
 - **`--retry-wait=10`**: pause 10 s between retries. Pairs well with HF's Resolver 429s (`RateLimit` header) — without a
   delay, retries re-trigger the same throttle.
 - **`--enable-rpc --rpc-listen-port=6800 --rpc-listen-all=false`**: exposes aria2c's built-in JSON-RPC interface on
-  `http://127.0.0.1:6800/jsonrpc` (localhost only). The progress server polls this every 2 s for real
+  `http://127.0.0.1:6800/jsonrpc` (localhost only). The progress server polls this every 10 s for real
   `completedLength` / `totalLength` / `downloadSpeed` — no HEAD requests, no `stat()` on the filesystem, immune to
   `prealloc`/`falloc` artifacts. See [Progress Page](#progress-page-during-download).
 - **`--header "Authorization: Bearer $HF_TOKEN"`**: auth header sent on all requests (required for gated repos).
@@ -243,7 +243,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
 ## Progress Page (during download)
 
 While the model files are being downloaded, the container serves a small self-refreshing HTML page on
-`${PORT:-8080}` — the same port llama-server will use later. The page auto-refreshes every 2 s and shows per-file
+`${PORT:-8080}` — the same port llama-server will use later. The page auto-refreshes every 10 s and shows per-file
 and overall progress, download speed, and ETA.
 
 The response is always:
@@ -261,7 +261,7 @@ Implementation:
 
 - `progress-server.py` (stdlib only — `http.server`, `socketserver`, `urllib.request`, `threading`, `html`) binds
   `0.0.0.0:$PORT` immediately and serves the progress page from the first millisecond. A daemon thread polls
-  aria2c's JSON-RPC interface every 2 s (`aria2.tellActive` + `aria2.tellWaiting` + `aria2.tellStopped`) for
+  aria2c's JSON-RPC interface every 10 s (`aria2.tellActive` + `aria2.tellWaiting` + `aria2.tellStopped`) for
   authoritative `length` / `completedLength` / `downloadSpeed` per file — no filesystem `stat`, no HEAD requests,
   no race with aria2c's `prealloc`/`falloc` (the file's apparent size is irrelevant; we read from aria2c's internal
   state instead).
