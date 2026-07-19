@@ -23,8 +23,12 @@ Models are downloaded via `aria2c` with an input file listing all configured URL
 
 - **`-c` (continue)**: resumes partial downloads via a `.aria2` control file + HTTP Range requests. An interrupted run
   continues where it left off on next start.
-- **`-x16 -s16`**: 16 parallel connections per file (chunked download).
+- **`-x $ARIA2_CONNECTIONS -s $ARIA2_SPLITS`** (defaults `4` / `4`): parallel connections per file / segments per file.
+  Defaults are deliberately low — see "Why conservative defaults" below.
 - **`-j3`**: downloads all 3 model files concurrently.
+- **`-k 1M`**: minimum split size of 1 MiB; with only 4 segments per file this is only relevant for very small files.
+- **`--retry-wait=10`**: pause 10 s between retries. Pairs well with HF's Resolver 429s (`RateLimit` header) — without a
+  delay, retries re-trigger the same throttle.
 - **`--enable-rpc --rpc-listen-port=6800 --rpc-listen-all=false`**: exposes aria2c's built-in JSON-RPC interface on
   `http://127.0.0.1:6800/jsonrpc` (localhost only). The progress server polls this every 2 s for real
   `completedLength` / `totalLength` / `downloadSpeed` — no HEAD requests, no `stat()` on the filesystem, immune to
@@ -36,6 +40,22 @@ Models are downloaded via `aria2c` with an input file listing all configured URL
 - **Retry loop**: the download is wrapped in a retry loop (default 3 attempts, configurable via `MAX_ATTEMPTS`). On
   failure, aria2c is re-invoked; `-c` ensures no wasted bandwidth.
 - aria2 is installed via `apt-get` (Debian package `aria2`).
+
+### Why conservative defaults
+
+HuggingFace rate-limits **`/resolve/` URLs** per source IP, in 5-minute fixed windows
+([HF rate-limits docs](https://huggingface.co/docs/hub/en/rate-limits)). Anonymous IPs get 3,000 requests / 5 min;
+free users 5,000; Pro 12,000; Team/Enterprise more. On a hit, HF responds with HTTP 429 and a `RateLimit` header that
+carries the seconds-until-reset — exactly the symptom of "long, inconsistent" downloads.
+
+The historical `-x16 -s16 -j3` setting opened 16 concurrent byte-range requests per file × 3 files = **48 simultaneous
+connections to HF** from one host. With 4 GB+ model files at ~1 MiB/s per connection this *will* burn through the
+anonymous 5-minute quota inside the first minute and then sit in 429-retry for the remainder. Community reports (e.g.
+[NVIDIA developer-forum aria2c-on-HF guide](https://forums.developer.nvidia.com/t/fast-large-file-and-llm-downloads-with-aria2-on-nvidia-jetson-agx-orin/365697))
+consistently recommend `-x8 -s8` or lower when downloading from HF; we default one step more conservative at `4/4`.
+
+Power users on non-HF sources (or with a Pro/Team HF token) can crank both vars up — `ARIA2_CONNECTIONS=8 ARIA2_SPLITS=8`
+in `.env` will reliably saturate a 1 Gb/s link without triggering HF's Resolver throttle on a non-anonymous IP.
 
 ## No defaults for runtime/behavior config
 
@@ -119,6 +139,13 @@ This step can only be done after the first build creates the package.
 | `PORT`       | `8080`  | llama-server HTTP port (mapped to host `${PORT:-8080}` in `docker-compose.yml`)           |
 | `MAX_ATTEMPTS` | `3`   | Max aria2c retry attempts before failing                                                  |
 | `HOST`       | `0.0.0.0` (hardcoded) | Bind address for llama-server (always `0.0.0.0` for container operation)        |
+
+### Download tuning (have defaults — see "Model Download (aria2c)")
+
+| Variable            | Default | Description                                                                                |
+|---------------------|---------|--------------------------------------------------------------------------------------------|
+| `ARIA2_CONNECTIONS` | `4`     | `-x` connections per file. Raise to `8` on non-HF sources or with a Pro/Team HF token.      |
+| `ARIA2_SPLITS`      | `4`     | `-s` splits per file. Normally equal to `ARIA2_CONNECTIONS`; rare to change independently.  |
 
 ### URLs (at least one required)
 

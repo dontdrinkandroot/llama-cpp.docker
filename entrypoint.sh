@@ -5,6 +5,14 @@ MODEL_DIR="${MODEL_DIR:-/models}"
 PORT="${PORT:-8080}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 
+# Per-file aria2c concurrency. Defaults are conservative (4 connections, 4 splits)
+# because HuggingFace rate-limits Resolver URLs per IP and high concurrency on a
+# single file (the historical `-x16 -s16` setting) reliably triggers throttling
+# — see AGENTS.md "Model Download (aria2c)" for the full rationale. Power users
+# on non-HF sources or with a Pro/Team HF account can raise these.
+ARIA2_CONNECTIONS="${ARIA2_CONNECTIONS:-4}"
+ARIA2_SPLITS="${ARIA2_SPLITS:-4}"
+
 PROGRESS_PID_FILE=/tmp/progress-server.pid
 ARIA2_PID_FILE=/tmp/aria2c.pid
 ARIA2_RPC_URL="${ARIA2_RPC_URL:-http://127.0.0.1:6800/jsonrpc}"
@@ -78,7 +86,11 @@ AUTH_HEADERS=()
 if [ -n "$HF_TOKEN" ]; then
     AUTH_HEADERS=(--header "Authorization: Bearer $HF_TOKEN")
 else
-    echo "WARNING: HF_TOKEN is not set. Downloads from gated repos will fail."
+    echo "WARNING: HF_TOKEN is not set."
+    echo "         Downloads from gated repos will fail, and anonymous-IP Resolver"
+    echo "         quota is the lowest tier (3,000 req / 5 min). A Pro/Team account"
+    echo "         with HF_TOKEN can multiply that quota and noticeably speed up"
+    echo "         downloads. See https://huggingface.co/settings/billing"
 fi
 
 INPUT_FILE="/tmp/aria2-input.txt"
@@ -110,10 +122,11 @@ until [ $attempt -gt "$MAX_ATTEMPTS" ]; do
     # down. -c resumes from any previous attempt's .aria2 control file.
     aria2c \
         -c \
-        -x16 \
-        -s16 \
+        -x "$ARIA2_CONNECTIONS" \
+        -s "$ARIA2_SPLITS" \
         -j3 \
         -k 1M \
+        --retry-wait=10 \
         --enable-rpc \
         --rpc-listen-port="$ARIA2_RPC_PORT" \
         --rpc-listen-all=false \
