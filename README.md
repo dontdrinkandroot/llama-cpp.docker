@@ -74,8 +74,8 @@ forces a fresh download.
 | `ARIA2_SPLITS` | `4` | aria2c `-s` (splits per file). Normally equal to `ARIA2_CONNECTIONS`. |
 | `MODEL_URL` | *(none — at least one URL must be set)* | URL for the main model GGUF file |
 | `MMPROJ_URL` | *(none)* | URL for the multimodal projector GGUF file (vision/audio models) |
-| `MTP_URL` | *(none)* | URL for the speculative-decoding draft model GGUF (e.g. MTP). Pairs with `SPEC_TYPE`. |
-| `SPEC_TYPE` | *(none)* | Speculative-decoding type, e.g. `mtp`. Only emitted when `MTP_URL` is set. |
+| `MTP_URL` | *(none)* | URL for the speculative-decoding draft model GGUF (e.g. MTP). Only needed when using an external draft file. |
+| `SPEC_TYPE` | *(none)* | Speculative-decoding type, e.g. `draft-mtp`. Emitted whenever set — also for models with a built-in MTP head (e.g. Qwen3.8-27B) that need no draft file. |
 | `CTX_SIZE` | *(upstream default)* | Sets `--ctx-size` (e.g. `65536`) |
 | `GPU_LAYERS` | *(upstream default)* | Sets `--n-gpu-layers` (e.g. `99` to offload all) |
 | `TEMPERATURE` | *(upstream default)* | Sets `--temp` (e.g. `0.6`) |
@@ -86,6 +86,9 @@ forces a fresh download.
 | `NO_CONT_BATCHING` | *(upstream default)* | Set to `1` to enable `--no-cont-batching` (default is cont-batching ON) |
 | `BATCH_SIZE` | *(upstream default)* | Sets `--batch-size` (e.g. `2048`) |
 | `UBATCH_SIZE` | *(upstream default)* | Sets `--ubatch-size` (e.g. `512`) |
+| `MIN_P` | *(upstream default)* | Sets `--min-p` (e.g. `0.05`) |
+| `CACHE_TYPE_K` | *(upstream default)* | Sets `--cache-type-k` (e.g. `f16`) |
+| `CACHE_TYPE_V` | *(upstream default)* | Sets `--cache-type-v` (e.g. `f16`) |
 
 Local filenames are derived from each URL via `basename` (e.g. `.../foo.gguf` → `$MODEL_DIR/foo.gguf`).
 

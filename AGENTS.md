@@ -60,7 +60,8 @@ in `.env` will reliably saturate a 1 Gb/s link without triggering HF's Resolver 
 ## No defaults for runtime/behavior config
 
 The runtime configuration variables (`CTX_SIZE`, `GPU_LAYERS`, `TEMPERATURE`, `TOP_P`, `TOP_K`, `PARALLEL`,
-`FLASH_ATTN`, `NO_CONT_BATCHING`, `BATCH_SIZE`, `UBATCH_SIZE`, `MMPROJ_URL`, `MTP_URL`, `SPEC_TYPE`) intentionally
+`FLASH_ATTN`, `NO_CONT_BATCHING`, `BATCH_SIZE`, `UBATCH_SIZE`, `MIN_P`, `CACHE_TYPE_K`, `CACHE_TYPE_V`,
+`MMPROJ_URL`, `MTP_URL`, `SPEC_TYPE`) intentionally
 have **no built-in defaults** in the entrypoint. An unset variable means "use whatever llama-server's upstream default
 is" — we never substitute our own opinionated default. Only the three infrastructure-level variables that the host
 needs to run the container have `${VAR:-default}` fallbacks: `MODEL_DIR` (`/models`), `PORT` (`8080`),
@@ -171,7 +172,10 @@ This step can only be done after the first build creates the package.
 | `NO_CONT_BATCHING`   | `--no-cont-batching` (when `=1`) | cont-batching enabled                  |
 | `BATCH_SIZE`         | `--batch-size` / `-b`    | `2048`                                        |
 | `UBATCH_SIZE`        | `--ubatch-size` / `-ub`  | `512`                                         |
-| `SPEC_TYPE`          | `--spec-type`            | _(unset; emitted only when `MTP_URL` is set)_ |
+| `MIN_P`              | `--min-p`                | `0.05`                                        |
+| `CACHE_TYPE_K`       | `--cache-type-k`         | `f16`                                         |
+| `CACHE_TYPE_V`       | `--cache-type-v`         | `f16`                                         |
+| `SPEC_TYPE`          | `--spec-type`            | `none` (emitted whenever set, independently of `MTP_URL`) |
 
 ### Other
 
@@ -182,14 +186,16 @@ This step can only be done after the first build creates the package.
 
 Local filenames are derived from each URL via `basename` (e.g. `.../foo.gguf` → `$MODEL_DIR/foo.gguf`).
 
-### Speculative decoding (MTP)
+### Speculative decoding (MTP / built-in head)
 
-When `MTP_URL` is set, the entrypoint also passes `--spec-draft-model $MODEL_DIR/<basename>`. If `SPEC_TYPE` is set, it
-additionally passes `--spec-type $SPEC_TYPE` — for the Gemma 4 MTP draft this must be `draft-mtp` (recent upstream
-llama.cpp renamed the bare `mtp` alias; `draft-mtp` is now the canonical value and bare `mtp` is rejected). For
-back-compat, the entrypoint silently rewrites a legacy `SPEC_TYPE=mtp` to `draft-mtp` and logs nothing. The
-llama-server default speculative type is `none`, so without `SPEC_TYPE` set alongside `MTP_URL` the draft model is
-loaded but not actually used.
+`--spec-draft-model $MODEL_DIR/<basename>` is passed **only** when `MTP_URL` is set (an external draft GGUF file).
+`--spec-type $SPEC_TYPE` is emitted whenever `SPEC_TYPE` is set, **independently of `MTP_URL`** — models with a
+built-in MTP head (e.g. Qwen3.8-27B) need `--spec-type` but no draft file.
+
+For the Gemma 4 MTP draft, `SPEC_TYPE` must be `draft-mtp` (recent upstream llama.cpp renamed the bare `mtp` alias;
+`draft-mtp` is now the canonical value and bare `mtp` is rejected). For back-compat, the entrypoint silently rewrites
+a legacy `SPEC_TYPE=mtp` to `draft-mtp` and logs nothing. The llama-server default speculative type is `none`, so
+without `SPEC_TYPE` set alongside `MTP_URL` the draft model is loaded but not actually used.
 
 ## Example: Gemma-4-26B-A4B (Unsloth, with MTP)
 

@@ -225,18 +225,23 @@ if [ -n "$MMPROJ_URL" ]; then
     MMPROJ_FLAG="--mmproj $MODEL_DIR/$(basename "$MMPROJ_URL")"
 fi
 
+# --spec-draft-model is only meaningful when an external draft file is
+# downloaded (MTP_URL). --spec-type is independent: a model with a built-in
+# MTP head (e.g. Qwen3.8-27B) needs --spec-type but no draft file.
+SPEC_TYPE_FLAG=""
+if [ -n "$SPEC_TYPE" ]; then
+    # Translate legacy/bare "mtp" to the current upstream value "draft-mtp"
+    # (valid in recent llama.cpp builds; bare "mtp" is now rejected).
+    spec_type="$SPEC_TYPE"
+    if [ "$spec_type" = "mtp" ]; then
+        spec_type="draft-mtp"
+    fi
+    SPEC_TYPE_FLAG="--spec-type $spec_type"
+fi
+
 MTP_FLAGS=""
 if [ -n "$MTP_URL" ]; then
     MTP_FLAGS="--spec-draft-model $MODEL_DIR/$(basename "$MTP_URL")"
-    if [ -n "$SPEC_TYPE" ]; then
-        # Translate legacy/bare "mtp" to the current upstream value "draft-mtp"
-        # (valid in recent llama.cpp builds; bare "mtp" is now rejected).
-        spec_type="$SPEC_TYPE"
-        if [ "$spec_type" = "mtp" ]; then
-            spec_type="draft-mtp"
-        fi
-        MTP_FLAGS="$MTP_FLAGS --spec-type $spec_type"
-    fi
 fi
 
 CTX_SIZE_FLAG=""
@@ -289,11 +294,27 @@ if [ -n "$UBATCH_SIZE" ]; then
     UBATCH_SIZE_FLAG="--ubatch-size $UBATCH_SIZE"
 fi
 
+MIN_P_FLAG=""
+if [ -n "$MIN_P" ]; then
+    MIN_P_FLAG="--min-p $MIN_P"
+fi
+
+CACHE_TYPE_K_FLAG=""
+if [ -n "$CACHE_TYPE_K" ]; then
+    CACHE_TYPE_K_FLAG="--cache-type-k $CACHE_TYPE_K"
+fi
+
+CACHE_TYPE_V_FLAG=""
+if [ -n "$CACHE_TYPE_V" ]; then
+    CACHE_TYPE_V_FLAG="--cache-type-v $CACHE_TYPE_V"
+fi
+
 CMD=(
     /app/llama-server
     $MODEL_FLAG
     $MMPROJ_FLAG
     $MTP_FLAGS
+    $SPEC_TYPE_FLAG
     --host 0.0.0.0
     --port "$PORT"
     $CTX_SIZE_FLAG
@@ -306,6 +327,9 @@ CMD=(
     $NO_CONT_BATCHING_FLAG
     $BATCH_SIZE_FLAG
     $UBATCH_SIZE_FLAG
+    $MIN_P_FLAG
+    $CACHE_TYPE_K_FLAG
+    $CACHE_TYPE_V_FLAG
     "$@"
 )
 
