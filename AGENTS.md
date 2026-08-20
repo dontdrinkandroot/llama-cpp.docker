@@ -61,7 +61,7 @@ in `.env` will reliably saturate a 1 Gb/s link without triggering HF's Resolver 
 
 The runtime configuration variables (`CTX_SIZE`, `GPU_LAYERS`, `TEMPERATURE`, `TOP_P`, `TOP_K`, `PARALLEL`,
 `FLASH_ATTN`, `NO_CONT_BATCHING`, `BATCH_SIZE`, `UBATCH_SIZE`, `MIN_P`, `CACHE_TYPE_K`, `CACHE_TYPE_V`,
-`MMPROJ_URL`, `MTP_URL`, `SPEC_TYPE`) intentionally
+`MMPROJ_URL`, `MTP_URL`, `SPEC_TYPE`, `REASONING`, `CHAT_TEMPLATE_KWARGS`) intentionally
 have **no built-in defaults** in the entrypoint. An unset variable means "use whatever llama-server's upstream default
 is" — we never substitute our own opinionated default. Only the three infrastructure-level variables that the host
 needs to run the container have `${VAR:-default}` fallbacks: `MODEL_DIR` (`/models`), `PORT` (`8080`),
@@ -176,6 +176,8 @@ This step can only be done after the first build creates the package.
 | `CACHE_TYPE_K`       | `--cache-type-k`         | `f16`                                         |
 | `CACHE_TYPE_V`       | `--cache-type-v`         | `f16`                                         |
 | `SPEC_TYPE`          | `--spec-type`            | `none` (emitted whenever set, independently of `MTP_URL`) |
+| `REASONING`          | `--reasoning`            | unset (upstream default)                      |
+| `CHAT_TEMPLATE_KWARGS` | `--chat-template-kwargs` | unset (upstream default)                     |
 
 ### Other
 

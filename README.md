@@ -89,6 +89,8 @@ forces a fresh download.
 | `MIN_P` | *(upstream default)* | Sets `--min-p` (e.g. `0.05`) |
 | `CACHE_TYPE_K` | *(upstream default)* | Sets `--cache-type-k` (e.g. `f16`) |
 | `CACHE_TYPE_V` | *(upstream default)* | Sets `--cache-type-v` (e.g. `f16`) |
+| `REASONING` | *(upstream default)* | Sets `--reasoning` (e.g. `high`) |
+| `CHAT_TEMPLATE_KWARGS` | *(upstream default)* | Sets `--chat-template-kwargs` (JSON string, e.g. `{"enable_thinking":true}`); passed as a single argument |
 
 Local filenames are derived from each URL via `basename` (e.g. `.../foo.gguf` → `$MODEL_DIR/foo.gguf`).
 

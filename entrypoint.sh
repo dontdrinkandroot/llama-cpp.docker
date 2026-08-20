@@ -309,6 +309,18 @@ if [ -n "$CACHE_TYPE_V" ]; then
     CACHE_TYPE_V_FLAG="--cache-type-v $CACHE_TYPE_V"
 fi
 
+REASONING_ARGS=()
+if [ -n "$REASONING" ]; then
+    REASONING_ARGS=(--reasoning "$REASONING")
+fi
+
+# Added as a single array element (not a flat string) so JSON like
+# {"enable_thinking":true} survives word-splitting intact.
+CHAT_TEMPLATE_KWARGS_ARGS=()
+if [ -n "$CHAT_TEMPLATE_KWARGS" ]; then
+    CHAT_TEMPLATE_KWARGS_ARGS=(--chat-template-kwargs "$CHAT_TEMPLATE_KWARGS")
+fi
+
 CMD=(
     /app/llama-server
     $MODEL_FLAG
@@ -330,6 +342,8 @@ CMD=(
     $MIN_P_FLAG
     $CACHE_TYPE_K_FLAG
     $CACHE_TYPE_V_FLAG
+    "${REASONING_ARGS[@]}"
+    "${CHAT_TEMPLATE_KWARGS_ARGS[@]}"
     "$@"
 )
 
