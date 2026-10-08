@@ -72,6 +72,7 @@ forces a fresh download.
 | `ARIA2_RPC_URL` | `http://127.0.0.1:6800/jsonrpc` | aria2c JSON-RPC endpoint that the progress server polls. Must match `--rpc-listen-port` used in `entrypoint.sh`. |
 | `ARIA2_CONNECTIONS` | `4` | aria2c `-x` (connections per server). Default is conservative to avoid HF per-IP Resolver rate limits; raise to `8` on non-HF sources or with a Pro/Team HF token. |
 | `ARIA2_SPLITS` | `4` | aria2c `-s` (splits per file). Normally equal to `ARIA2_CONNECTIONS`. |
+| `KEEP_CUDA_COMPAT` | *(unset = neutralized)* | Set to `1` to keep the image's CUDA forward-compat libraries in the search path (skips the neutralization). See [CUDA compatibility](#cuda-compatibility-host-driver-wins). |
 | `MODEL_URL` | *(none — at least one URL must be set)* | URL for the main model GGUF file |
 | `MMPROJ_URL` | *(none)* | URL for the multimodal projector GGUF file (vision/audio models) |
 | `MTP_URL` | *(none)* | URL for the speculative-decoding draft model GGUF (e.g. MTP). Only needed when using an external draft file. |
@@ -168,6 +169,30 @@ PORT=8080
 > `llama-server` (see [ggml-org/llama.cpp#19712](https://github.com/ggml-org/llama.cpp/issues/19712)).
 > Recent upstream builds reportedly fixed it; if startup fails with this combo, drop `MTP_URL`
 > first to confirm the model itself runs, then re-add it.
+
+## CUDA compatibility (host driver wins)
+
+The upstream CUDA image ships **CUDA forward-compat** libraries (`/usr/local/cuda*/compat`) and registers them on the
+library search path (typically first in the ld cache via a `cuda-compat.conf` entry). The bundled `libcuda.so.1` then
+shadows the **host driver's** `libcuda.so.1` — which the NVIDIA container runtime mounts at
+`/usr/lib/x86_64-linux-gnu` (`NVIDIA_DRIVER_CAPABILITIES=compute,utility`) — and consumer GPUs fail with
+`CUDA_ERROR_SYSTEM_DRIVER_MISMATCH` (CUDA error 803), because forward compatibility is only supported on datacenter /
+select pro GPUs.
+
+Before starting llama-server, the entrypoint therefore neutralizes the compat libraries:
+
+- strips `/usr/local/cuda*/compat*` entries from `LD_LIBRARY_PATH` and prepends `/usr/lib/x86_64-linux-gnu`;
+- deletes any compat entry from `/etc/ld.so.conf.d/` and re-runs `ldconfig`.
+
+The host driver then wins everywhere: a consumer GPU on an older driver works via CUDA minor-version compatibility
+(e.g. RTX 4090 + 535/550 driver with this CUDA 12.8-based image), and hosts with driver ≥ 570 are unaffected. This
+mirrors the vLLM fix that made CUDA-compat loading opt-in
+([vllm-project/vllm#33992](https://github.com/vllm-project/vllm/pull/33992)).
+
+> **Caveat / opt-out:** Compat libraries are only *needed* when the image's CUDA major is newer than the host driver
+> supports — e.g. if this image ever moves to a cuda13 base while datacenter hosts still run 12.x drivers. Set
+> `KEEP_CUDA_COMPAT=1` to skip the neutralization and let the compat libs load (datacenter / select pro GPUs only —
+> never on GeForce/RTX).
 
 ## Web UI
 

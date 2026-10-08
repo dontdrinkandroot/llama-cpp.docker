@@ -356,4 +356,46 @@ echo "============================"
 # server so llama-server can bind --port. exec below does not fire traps.
 cleanup
 
+# Neutralize CUDA forward-compat shadowing so the HOST driver wins. The
+# upstream CUDA image ships compat libs (/usr/local/cuda*/compat/libcuda.so.1)
+# that end up first in the ld cache / LD_LIBRARY_PATH and shadow the host
+# driver's libcuda.so.1 (mounted at /usr/lib/x86_64-linux-gnu by the NVIDIA
+# container runtime, NVIDIA_DRIVER_CAPABILITIES=compute,utility). Forward
+# compat is only supported on datacenter / select pro GPUs — on consumer GPUs
+# (e.g. RTX 4090 on a 535/550 driver) the shadowing lib causes CUDA error 803
+# (CUDA_ERROR_SYSTEM_DRIVER_MISMATCH). With the host driver winning, CUDA
+# minor-version compatibility makes older-driver consumer GPUs work and hosts
+# with driver >= 570 are unaffected. Mirrors the vLLM fix that made CUDA-compat
+# loading opt-in (vllm-project/vllm#33992 / #34821).
+#
+# Opt-out: KEEP_CUDA_COMPAT=1 skips the neutralization. Needed only when the
+# image's CUDA major is newer than the host driver supports (e.g. a future
+# cuda13 image on a datacenter host still on 12.x drivers).
+if [ "${KEEP_CUDA_COMPAT:-0}" != "1" ]; then
+    # Strip compat entries from LD_LIBRARY_PATH (anywhere, not just trailing)
+    # and prepend the host driver dir so it always wins.
+    new_ld_path="/usr/lib/x86_64-linux-gnu"
+    IFS=':' read -ra ld_parts <<< "${LD_LIBRARY_PATH:-}"
+    for p in "${ld_parts[@]}"; do
+        case "$p" in
+            /usr/local/cuda*/compat*|/usr/local/cuda-compat*|"") ;;
+            *) new_ld_path="$new_ld_path:$p" ;;
+        esac
+    done
+    export LD_LIBRARY_PATH="$new_ld_path"
+    # Drop compat from the ld cache too (base images register it via
+    # /etc/ld.so.conf.d/*.conf; llama-server would resolve libcuda.so.1 to the
+    # compat copy through the cache even with LD_LIBRARY_PATH fixed).
+    for conf in /etc/ld.so.conf.d/*.conf; do
+        [ -e "$conf" ] || continue
+        if grep -qi 'compat' "$conf" 2>/dev/null; then
+            rm -f "$conf"
+        fi
+    done
+    ldconfig || true
+    echo "=== CUDA compat neutralized: host driver libcuda.so.1 wins ==="
+else
+    echo "=== KEEP_CUDA_COMPAT=1: CUDA compat libs left in the search path ==="
+fi
+
 exec "${CMD[@]}"

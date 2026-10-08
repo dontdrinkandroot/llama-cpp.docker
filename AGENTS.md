@@ -67,6 +67,26 @@ is" — we never substitute our own opinionated default. Only the three infrastr
 needs to run the container have `${VAR:-default}` fallbacks: `MODEL_DIR` (`/models`), `PORT` (`8080`),
 `MAX_ATTEMPTS` (`3`).
 
+## CUDA Compat Neutralization (host driver wins)
+
+Before `exec`-ing llama-server, `entrypoint.sh` neutralizes the CUDA forward-compat libraries bundled in the upstream
+image (`/usr/local/cuda*/compat`) so the **host driver** always wins:
+
+- Strips `/usr/local/cuda*/compat*` entries from `LD_LIBRARY_PATH` and prepends `/usr/lib/x86_64-linux-gnu` — where the
+  NVIDIA container runtime mounts the host driver libs (`NVIDIA_DRIVER_CAPABILITIES=compute,utility`).
+- Deletes any compat entry from `/etc/ld.so.conf.d/*.conf` and re-runs `ldconfig` — the shadowing usually lives in the
+  **ld cache** (compat `libcuda.so.1` listed before the host one), which `LD_LIBRARY_PATH` alone does not fix reliably.
+
+Why: CUDA forward compatibility is only supported on datacenter / select pro GPUs. On consumer GPUs (e.g. RTX 4090 on
+a 535/550 driver) the shadowing compat lib causes `CUDA_ERROR_SYSTEM_DRIVER_MISMATCH` (CUDA error 803). With the
+neutralization, CUDA minor-version compatibility makes older-driver consumer GPUs work; hosts with driver ≥ 570 are
+unaffected. Mirrors the vLLM fix that made CUDA-compat loading opt-in
+([vllm-project/vllm#33992](https://github.com/vllm-project/vllm/pull/33992), later [#34821](https://github.com/vllm-project/vllm/pull/34821)).
+
+**Opt-out (keep compat):** `KEEP_CUDA_COMPAT=1` skips the neutralization entirely. Needed only when the image's CUDA
+major is newer than the host driver supports — e.g. if this project ever moves to a **cuda13** image while datacenter
+hosts still run 12.x drivers (then compat must come back). Never set it on consumer GPUs.
+
 ## Project Structure
 
 ```
@@ -75,7 +95,7 @@ needs to run the container have `${VAR:-default}` fallbacks: `MODEL_DIR` (`/mode
 │   └── workflows/
 │       └── docker-publish.yml  # CI: build & push image to GHCR
 ├── Dockerfile          # FROM upstream CUDA server image; installs aria2, curl, python3, sshd StrictModes fix + entrypoint; HEALTHCHECK
-├── entrypoint.sh       # Downloads models via aria2c, then execs llama-server; starts/stops progress-server.py
+├── entrypoint.sh       # Downloads models via aria2c, then execs llama-server; starts/stops progress-server.py; neutralizes CUDA compat before exec
 ├── progress-server.py  # Stdlib HTTP server + JSON-RPC client: 503 progress page during download, polls aria2c at 127.0.0.1:6800
 ├── docker-compose.yml  # Port 8080, GPU, models volume, env_file: .env, all config via env vars
 ├── .dockerignore
@@ -185,6 +205,7 @@ This step can only be done after the first build creates the package.
 |------------------|---------------------------------------------|-----------------------------------------------------------------------------------|
 | `HF_TOKEN`       | (empty)                                     | HuggingFace token. Required only for gated repos. Optional for public repos.     |
 | `ARIA2_RPC_URL`  | `http://127.0.0.1:6800/jsonrpc`             | URL of aria2c's JSON-RPC endpoint. Must match the `--rpc-listen-port` used in `entrypoint.sh`. |
+| `KEEP_CUDA_COMPAT` | (unset) | Set `1` to opt out of the CUDA-compat neutralization and keep the image's forward-compat libs (needed only if the image's CUDA major outruns the host driver). See "CUDA Compat Neutralization". |
 
 Local filenames are derived from each URL via `basename` (e.g. `.../foo.gguf` → `$MODEL_DIR/foo.gguf`).
 
